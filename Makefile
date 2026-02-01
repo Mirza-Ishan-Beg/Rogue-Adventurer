@@ -21,7 +21,7 @@ WASM_FLAGS = -s WASM=1 \
              -s EXPORT_NAME="'GameCore'" \
              -s EXPORTED_FUNCTIONS="['_game_init_live_location_wasm', '_game_cleanup_live_location_wasm', '_game_create_player_wasm', '_game_create_foe_wasm', '_game_create_item_wasm', '_game_add_scene_element_wasm', '_game_move_player_wasm', '_game_get_player_position_x', '_game_get_player_position_y', '_game_get_foe_count', '_game_get_item_count', '_game_get_live_location_wasm']"
 
-.PHONY: all clean setup help
+.PHONY: all clean setup help prod dev
 
 # Default target
 all: setup prod

@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rogue Adventurer</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Courier New', monospace;
+            background-color: #1a1a1a;
+            color: #00ff00;
+        }
+        
+        #gameCanvas {
+            border: 2px solid #00ff00;
+            display: block;
+            margin: 20px auto;
+            background-color: #000000;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+        
+        #ui {
+            text-align: center;
+            margin: 20px;
+        }
+        
+        .controls {
+            margin-top: 20px;
+            text-align: center;
+        }
+        
+        .controls button {
+            background-color: #333;
+            color: #00ff00;
+            border: 1px solid #00ff00;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .controls button:hover {
+            background-color: #555;
+        }
+        
+        #status {
+            margin: 10px;
+            font-size: 14px;
+            color: #ffff00;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h1>Rogue Adventurer</h1>
+        <div id="status">
+            <div>Position: <span id="playerPos">0, 0</span></div>
+            <div>Health: <span id="playerHealth">100</span></div>
+            <div>Foes: <span id="foeCount">0</span></div>
+            <div>Items: <span id="itemCount">0</span></div>
+        </div>
+    </div>
+    
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    
+    <div class="controls">
+        <button onclick="movePlayer('up')">↑</button>
+        <button onclick="movePlayer('down')">↓</button>
+        <button onclick="movePlayer('left')">←</button>
+        <button onclick="movePlayer('right')">→</button>
+        <button onclick="createFoe()">Add Foe</button>
+        <button onclick="createItem()">Add Item</button>
+        <button onclick="initGame()">Init Game</button>
+    </div>
+
+    <script>
+        let gameCore = null;
+        let canvas = document.getElementById('gameCanvas');
+        let ctx = canvas.getContext('2d');
+        
+        // Game state
+        let gameState = {
+            player: { x: 5, y: 5, health: 100 },
+            foes: [],
+            items: [],
+            mapWidth: 20,
+            mapHeight: 15
+        };
+        
+        // Initialize game
+        async function initGame() {
+            try {
+                // Load WASM module
+                const wasmUrl = './build/game_core.wasm';
+                const response = await fetch(wasmUrl);
+                const wasmBytes = await response.arrayBuffer();
+                
+                const wasmModule = await WebAssembly.instantiate(wasmBytes, {
+                    env: {
+                        memory: new WebAssembly.Memory({ initial: 64 })
+                    }
+                });
+                
+                gameCore = wasmModule.instance;
+                
+                // Initialize live location
+                gameCore.exports.game_init_live_location_wasm(20, 15, 800, 600);
+                
+                // Create player
+                gameCore.exports.game_create_player_wasm(
+                    "Hero", 
+                    "Brave adventurer",
+                    "assets/player.png", 
+                    "assets/player_asset.png",
+                    5, 5, 100, 50, 25
+                );
+                
+                // Create initial foes
+                gameCore.exports.game_create_foe_wasm(
+                    "Goblin", 
+                    "Weak enemy", 
+                    "assets/goblin.png", 
+                    "assets/goblin_asset.png",
+                    10, 10, 30, 10, 5, true
+                );
+                
+                gameCore.exports.game_create_foe_wasm(
+                    "Orc", 
+                    "Strong enemy", 
+                    "assets/orc.png", 
+                    "assets/orc_asset.png",
+                    15, 8, 50, 15, 10, true
+                );
+                
+                // Create initial items
+                gameCore.exports.game_create_item_wasm(
+                    "Health Potion", 
+                    "Restores health", 
+                    "assets/potion.png", 
+                    "assets/potion_asset.png",
+                    7, 7, 20, 0, 0, true
+                );
+                
+                gameCore.exports.game_create_item_wasm(
+                    "Sword", 
+                    "Increases attack", 
+                    "assets/sword.png", 
+                    "assets/sword_asset.png",
+                    12, 12, 0, 10, 0, true
+                );
+                
+                updateStatus();
+                render();
+                
+                document.getElementById('status').innerHTML += '<div style="color: #00ff00;">Game initialized successfully!</div>';
+                
+            } catch (error) {
+                console.error('Failed to initialize game:', error);
+                document.getElementById('status').innerHTML += '<div style="color: #ff0000;">Failed to initialize WASM module</div>';
+            }
+        }
+        
+        function updateStatus() {
+            try {
+                if (gameCore) {
+                    const playerX = gameCore.exports.game_get_player_position_x();
+                    const playerY = gameCore.exports.game_get_player_position_y();
+                    const foeCount = gameCore.exports.game_get_foe_count();
+                    const itemCount = gameCore.exports.game_get_item_count();
+                    
+                    document.getElementById('playerPos').textContent = `${playerX}, ${playerY}`;
+                    document.getElementById('playerHealth').textContent = '100'; // Would get from WASM
+                    document.getElementById('foeCount').textContent = foeCount;
+                    document.getElementById('itemCount').textContent = itemCount;
+                }
+            } catch (error) {
+                console.error('Error updating status:', error);
+            }
+        }
+        
+        function render() {
+            // Clear canvas
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw grid
+            ctx.strokeStyle = '#333333';
+            ctx.lineWidth = 1;
+            const tileSize = 40;
+            
+            for (let x = 0; x <= gameState.mapWidth; x++) {
+                ctx.beginPath();
+                ctx.moveTo(x * tileSize, 0);
+                ctx.lineTo(x * tileSize, gameState.mapHeight * tileSize);
+                ctx.stroke();
+            }
+            
+            for (let y = 0; y <= gameState.mapHeight; y++) {
+                ctx.beginPath();
+                ctx.moveTo(0, y * tileSize);
+                ctx.lineTo(gameState.mapWidth * tileSize, y * tileSize);
+                ctx.stroke();
+            }
+            
+            try {
+                if (gameCore) {
+                    // Draw player
+                    const playerX = gameCore.exports.game_get_player_position_x();
+                    const playerY = gameCore.exports.game_get_player_position_y();
+                    
+                    ctx.fillStyle = '#00ff00';
+                    ctx.fillRect(playerX * tileSize, playerY * tileSize, tileSize, tileSize);
+                    ctx.fillStyle = '#000000';
+                    ctx.font = '20px Courier New';
+                    ctx.fillText('@', playerX * tileSize + 10, playerY * tileSize + 25);
+                    
+                    // Draw entities (simplified - would iterate through WASM data)
+                    ctx.fillStyle = '#ff0000';
+                    ctx.fillRect(10 * tileSize, 10 * tileSize, tileSize, tileSize);
+                    ctx.fillText('F', 10 * tileSize + 10, 10 * tileSize + 25);
+                    
+                    ctx.fillRect(15 * tileSize, 8 * tileSize, tileSize, tileSize);
+                    ctx.fillText('O', 15 * tileSize + 10, 8 * tileSize + 25);
+                    
+                    ctx.fillStyle = '#0088ff';
+                    ctx.fillRect(7 * tileSize, 7 * tileSize, tileSize, tileSize);
+                    ctx.fillText('I', 7 * tileSize + 10, 7 * tileSize + 25);
+                    
+                    ctx.fillStyle = '#ffff00';
+                    ctx.fillRect(12 * tileSize, 12 * tileSize, tileSize, tileSize);
+                    ctx.fillText('S', 12 * tileSize + 10, 12 * tileSize + 25);
+                }
+            } catch (error) {
+                console.error('Error rendering:', error);
+            }
+        }
+        
+        function movePlayer(direction) {
+            if (!gameCore) {
+                document.getElementById('status').innerHTML += '<div style="color: #ffff00;">Please initialize game first!</div>';
+                return;
+            }
+            
+            try {
+                const playerX = gameCore.exports.game_get_player_position_x();
+                const playerY = gameCore.exports.game_get_player_position_y();
+                let newX = playerX;
+                let newY = playerY;
+                
+                switch(direction) {
+                    case 'up': newY = Math.max(0, playerY - 1); break;
+                    case 'down': newY = Math.min(gameState.mapHeight - 1, playerY + 1); break;
+                    case 'left': newX = Math.max(0, playerX - 1); break;
+                    case 'right': newX = Math.min(gameState.mapWidth - 1, playerX + 1); break;
+                }
+                
+                const result = gameCore.exports.game_move_player_wasm(newX, newY);
+                
+                if (result === 0) { // GAME_SUCCESS
+                    updateStatus();
+                    render();
+                } else {
+                    document.getElementById('status').innerHTML += `<div style="color: #ff6600;">Move failed with code: ${result}</div>`;
+                }
+                
+            } catch (error) {
+                console.error('Error moving player:', error);
+            }
+        }
+        
+        function createFoe() {
+            if (!gameCore) {
+                document.getElementById('status').innerHTML += '<div style="color: #ffff00;">Please initialize game first!</div>';
+                return;
+            }
+            
+            try {
+                const x = Math.floor(Math.random() * gameState.mapWidth);
+                const y = Math.floor(Math.random() * gameState.mapHeight);
+                const health = Math.floor(Math.random() * 30) + 20;
+                const attack = Math.floor(Math.random() * 15) + 5;
+                const defense = Math.floor(Math.random() * 10) + 2;
+                
+                gameCore.exports.game_create_foe_wasm(
+                    `Foe${Date.now()}`,
+                    "Random enemy",
+                    "assets/enemy.png",
+                    "assets/enemy_asset.png",
+                    x, y, health, attack, defense, 1
+                );
+                
+                updateStatus();
+                render();
+                
+            } catch (error) {
+                console.error('Error creating foe:', error);
+            }
+        }
+        
+        function createItem() {
+            if (!gameCore) {
+                document.getElementById('status').innerHTML += '<div style="color: #ffff00;">Please initialize game first!</div>';
+                return;
+            }
+            
+            try {
+                const x = Math.floor(Math.random() * gameState.mapWidth);
+                const y = Math.floor(Math.random() * gameState.mapHeight);
+                
+                gameCore.exports.game_create_item_wasm(
+                    `Item${Date.now()}`,
+                    "Random item",
+                    "assets/item.png",
+                    "assets/item_asset.png",
+                    x, y, 0, Math.floor(Math.random() * 20), 0, 1
+                );
+                
+                updateStatus();
+                render();
+                
+            } catch (error) {
+                console.error('Error creating item:', error);
+            }
+        }
+        
+        // Initialize on load
+        window.onload = function() {
+            document.getElementById('status').innerHTML += '<div style="color: #ffff00;">Ready to initialize game. Click "Init Game" to start.</div>';
+        };
+    </script>
+</body>
+</html>
